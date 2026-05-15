@@ -10,7 +10,7 @@ from graphrag_common.factory import Factory
 
 from graphrag_llm.cache import create_cache_key
 from graphrag_llm.config.tokenizer_config import TokenizerConfig
-from graphrag_llm.config.types import LLMProviderType
+from graphrag_llm.config.types import LLMProviderType, TokenizerType
 from graphrag_llm.metrics.noop_metrics_store import NoopMetricsStore
 from graphrag_llm.tokenizer.tokenizer_factory import create_tokenizer
 
@@ -104,11 +104,28 @@ def create_completion(
                     completion_type=LLMProviderType.MockLLM,
                     completion_initializer=MockLLMCompletion,
                 )
+            case LLMProviderType.CodeBuddy:
+                from graphrag_llm.completion.codebuddy_completion import (
+                    CodeBuddyCompletion,
+                )
+
+                register_completion(
+                    completion_type=LLMProviderType.CodeBuddy,
+                    completion_initializer=CodeBuddyCompletion,
+                )
             case _:
                 msg = f"ModelConfig.type '{strategy}' is not registered in the CompletionFactory. Registered strategies: {', '.join(completion_factory.keys())}"
                 raise ValueError(msg)
 
-    tokenizer = tokenizer or create_tokenizer(TokenizerConfig(model_id=model_id))
+    if tokenizer is None and strategy == LLMProviderType.CodeBuddy:
+        tokenizer = create_tokenizer(
+            TokenizerConfig(
+                type=TokenizerType.Tiktoken,
+                encoding_name=extra.get("encoding_name", "o200k_base"),
+            )
+        )
+    else:
+        tokenizer = tokenizer or create_tokenizer(TokenizerConfig(model_id=model_id))
 
     rate_limiter: RateLimiter | None = None
     if model_config.rate_limit:
