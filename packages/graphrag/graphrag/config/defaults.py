@@ -307,7 +307,7 @@ class SnapshotsDefaults:
     """Default values for snapshots."""
 
     embeddings: bool = False
-    graphml: bool = False
+    graphml: bool = True
     raw_graph: bool = False
 
 

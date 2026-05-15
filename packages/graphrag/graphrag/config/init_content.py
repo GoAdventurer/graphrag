@@ -109,7 +109,7 @@ community_reports:
   max_input_length: {graphrag_config_defaults.community_reports.max_input_length}
 
 snapshots:
-  graphml: false
+  graphml: true
   embeddings: false
 
 ### Query settings ###

@@ -13,7 +13,8 @@ if TYPE_CHECKING:
     from graphrag_llm.completion import LLMCompletion
     from graphrag_llm.types import LLMCompletionResponse
 
-# these tokens are used in the prompt
+# 下面这些 key 会被用于 prompt.format(...)
+# prompt 模板中通过 {entity_name}、{description_list}、{max_length} 占位。
 ENTITY_NAME_KEY = "entity_name"
 DESCRIPTION_LIST_KEY = "description_list"
 MAX_LENGTH_KEY = "max_length"
@@ -23,7 +24,9 @@ MAX_LENGTH_KEY = "max_length"
 class SummarizationResult:
     """Unipartite graph extraction result class definition."""
 
+    # 实体摘要时 id 是实体 title；关系摘要时 id 是 (source, target)。
     id: str | tuple[str, str]
+    # LLM 合并后的最终描述。
     description: str
 
 
@@ -46,11 +49,16 @@ class SummarizeExtractor:
     ):
         """Init method definition."""
         # TODO: streamline construction
+        # model 是 LLMCompletion 实例，负责实际调用大模型。
         self._model = model
+        # 使用模型自带 tokenizer 估算 prompt 和描述列表的 token 数，避免超过输入上限。
         self._tokenizer = model.tokenizer
+        # 描述总结 prompt 模板。
         self._summarization_prompt = summarization_prompt
         self._on_error = on_error or (lambda _e, _s, _d: None)
+        # 输出摘要的最大长度，由配置 summarize_descriptions.max_length 控制。
         self._max_summary_length = max_summary_length
+        # 输入 prompt 的最大 token 数，用于控制一次塞给 LLM 的描述数量。
         self._max_input_tokens = max_input_tokens
 
     async def __call__(
@@ -61,10 +69,13 @@ class SummarizeExtractor:
         """Call method definition."""
         result = ""
         if len(descriptions) == 0:
+            # 没有描述时返回空字符串。
             result = ""
         elif len(descriptions) == 1:
+            # 只有一条描述时不需要调用 LLM，直接复用原描述，节省成本。
             result = descriptions[0]
         else:
+            # 多条描述需要合并去重、压缩表达，因此调用 LLM 总结。
             result = await self._summarize_descriptions(id, descriptions)
 
         return SummarizationResult(
@@ -76,6 +87,7 @@ class SummarizeExtractor:
         self, id: str | tuple[str, str], descriptions: list[str]
     ) -> str:
         """Summarize descriptions into a single description."""
+        # 关系 id 可能是 tuple/list，为了让 prompt 中展示稳定，先做排序处理。
         sorted_id = sorted(id) if isinstance(id, list) else id
 
         # Safety check, should always be a list
@@ -84,9 +96,11 @@ class SummarizeExtractor:
 
         # Sort description lists
         if len(descriptions) > 1:
+            # 排序让相同输入在多次运行中保持稳定顺序，有利于缓存和可复现。
             descriptions = sorted(descriptions)
 
         # Iterate over descriptions, adding all until the max input tokens is reached
+        # 先预留 prompt 模板自身占用的 token，再逐条加入 description。
         usable_tokens = self._max_input_tokens - self._tokenizer.num_tokens(
             self._summarization_prompt
         )
@@ -94,6 +108,7 @@ class SummarizeExtractor:
         result = ""
 
         for i, description in enumerate(descriptions):
+            # 每加入一条描述，就扣除它占用的 token。
             usable_tokens -= self._tokenizer.num_tokens(description)
             descriptions_collected.append(description)
 
@@ -102,12 +117,15 @@ class SummarizeExtractor:
                 i == len(descriptions) - 1
             ):
                 # Calculate result (final or partial)
+                # 如果描述太多超出 token 限制，就先对当前批次做一次部分总结。
                 result = await self._summarize_descriptions_with_llm(
                     sorted_id, descriptions_collected
                 )
 
                 # If we go for another loop, reset values to new
                 if i != len(descriptions) - 1:
+                    # 将部分总结结果作为下一轮输入的第一条描述，
+                    # 继续合并剩余描述，形成“滚动压缩”。
                     descriptions_collected = [result]
                     usable_tokens = (
                         self._max_input_tokens
@@ -121,6 +139,8 @@ class SummarizeExtractor:
         self, id: str | tuple[str, str] | list[str], descriptions: list[str]
     ):
         """Summarize descriptions using the LLM."""
+        # 将实体/关系标识、描述列表和最大长度填入 prompt，
+        # 让 LLM 输出一段去重、完整、长度受控的最终描述。
         response: LLMCompletionResponse = await self._model.completion_async(
             messages=self._summarization_prompt.format(**{
                 ENTITY_NAME_KEY: json.dumps(id, ensure_ascii=False),
@@ -131,4 +151,5 @@ class SummarizeExtractor:
             }),
         )  # type: ignore
         # Calculate result
+        # GraphRAG 只取 LLM 返回的文本内容作为最终 description。
         return response.content

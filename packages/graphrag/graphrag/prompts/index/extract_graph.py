@@ -3,6 +3,17 @@
 
 """A file containing prompts definition."""
 
+# 实体/关系抽取主 prompt。
+# 这个 prompt 会被 GraphExtractor 填入：
+# - {entity_types}: 允许抽取的实体类型列表，例如 organization/person/geo/event
+# - {input_text}: 当前 text_unit 的文本内容
+#
+# 重要约束：
+# - LLM 必须用 ("entity"<|>...) 输出实体
+# - LLM 必须用 ("relationship"<|>...) 输出关系
+# - 多条记录之间用 ## 分隔
+# - 结束时输出 <|COMPLETE|>
+# graph_extractor.py 会严格按这些分隔符解析模型输出，所以不要随意改格式。
 GRAPH_EXTRACTION_PROMPT = """
 -Goal-
 Given a text document that is potentially relevant to this activity and a list of entity types, identify all entities of those types from the text and all relationships among the identified entities.
@@ -125,5 +136,12 @@ Text: {input_text}
 ######################
 Output:"""
 
+# 补抽 prompt。
+# 第一轮抽取后，如果 max_gleanings > 0，GraphExtractor 会追加这条消息，
+# 要求 LLM 在已有结果基础上继续补充遗漏的实体和关系，并保持相同输出格式。
 CONTINUE_PROMPT = "MANY entities and relationships were missed in the last extraction. Remember to ONLY emit entities that match any of the previously extracted types. Add them below using the same format:\n"
+# 是否继续补抽的判断 prompt。
+# LLM 只需要回答 Y 或 N：
+# - Y: 仍有遗漏，继续补抽
+# - N 或其他: 停止补抽
 LOOP_PROMPT = "It appears some entities and relationships may have still been missed. Answer Y if there are still entities or relationships that need to be added, or N if there are none. Please answer with a single letter Y or N.\n"
