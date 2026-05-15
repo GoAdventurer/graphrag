@@ -31,11 +31,17 @@ async def run_workflow(
     """All the steps to transform base text_units."""
     logger.info("Workflow started: create_base_text_units")
 
+    # 根据配置中的 encoding_model 创建 tokenizer。
+    # tokenizer 用来统计 token 数，也为 TokenChunker 提供 encode/decode。
     tokenizer = get_tokenizer(encoding_model=config.chunking.encoding_model)
+    # 根据 chunking 配置创建具体切片器。
+    # 默认会创建 TokenChunker，按固定 token 窗口和 overlap 进行切片。
     chunker = create_chunker(config.chunking, tokenizer.encode, tokenizer.decode)
 
     async with (
+        # documents 是前序输入阶段整理出的原始文档表。
         context.output_table_provider.open("documents") as documents_table,
+        # text_units 是本阶段输出表，每一行对应一个切片后的文本单元。
         context.output_table_provider.open("text_units") as text_units_table,
     ):
         total_rows = await documents_table.length()
@@ -93,20 +99,30 @@ async def create_base_text_units(
     )
 
     doc_index = 0
+    # 只保留少量样例行作为 workflow 输出，真正的完整结果会被逐行写入 text_units 表。
     sample_rows: list[dict[str, Any]] = []
     sample_size = 5
 
+    # 逐篇读取文档并立即写出切片，避免把所有文档和所有 chunk 一次性加载到内存。
     async for doc in documents_table:
+        # 对单篇文档进行切片，返回字符串列表。
+        # 如果配置了 prepend_metadata，每个 chunk 前面会带上指定文档元数据。
         chunks = chunk_document(doc, chunker, prepend_metadata)
         for chunk_text in chunks:
             if chunk_text is None:
                 continue
+            # text_unit 是 GraphRAG 后续流程的基础资料单元：
+            # - 实体关系抽取会读取 text_unit
+            # - embedding 会对 text_unit 建向量
+            # - 查询时也会把相关 text_unit 放入上下文
             row = {
                 "id": "",
                 "document_id": doc["id"],
                 "text": chunk_text,
                 "n_tokens": len(tokenizer.encode(chunk_text)),
             }
+            # 使用文本内容生成稳定 ID。
+            # 同一段文本在重复建库时会得到相同 ID，便于缓存、更新和去重。
             row["id"] = gen_sha512_hash(row, ["text"])
             await text_units_table.write(row)
 
@@ -147,6 +163,7 @@ def chunk_document(
     """
     transformer = None
     if prepend_metadata:
+        # 将普通 dict 包装成 TextDocument，方便统一读取 title、creation_date、raw_data 等字段。
         document = TextDocument(
             id=doc["id"],
             title=doc.get("title", ""),
@@ -154,7 +171,12 @@ def chunk_document(
             creation_date=doc.get("creation_date", ""),
             raw_data=doc.get("raw_data"),
         )
+        # collect 会按配置提取需要追加到 chunk 前面的元数据。
         metadata = document.collect(prepend_metadata)
+        # add_metadata 返回一个 transform 函数。
+        # 切片器产出每个 chunk 后，会用这个函数把元数据拼到 chunk 文本前面。
         transformer = add_metadata(metadata=metadata, line_delimiter=".\n")
 
+    # chunker.chunk 返回 TextChunk 对象；这里最终只取 text 字段，
+    # 因为 text_units 表只需要写入可用于后续抽取、向量化和查询的文本内容。
     return [chunk.text for chunk in chunker.chunk(doc["text"], transform=transformer)]
