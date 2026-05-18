@@ -145,3 +145,67 @@ CONTINUE_PROMPT = "MANY entities and relationships were missed in the last extra
 # - Y: 仍有遗漏，继续补抽
 # - N 或其他: 停止补抽
 LOOP_PROMPT = "It appears some entities and relationships may have still been missed. Answer Y if there are still entities or relationships that need to be added, or N if there are none. Please answer with a single letter Y or N.\n"
+
+
+# 中文实体/关系抽取 prompt 模板。
+# 这个常量不会自动覆盖默认 prompt；如果输入资料主要是中文，可以把它写入
+# prompts/extract_graph.txt，或在配置中把 extract_graph.prompt 指向自定义文件。
+# 保留英文默认模板是为了兼容原项目示例和英文数据集。
+GRAPH_EXTRACTION_PROMPT_ZH = """
+-目标-
+给定一段可能与当前任务相关的文本，以及允许抽取的实体类型列表，请识别文本中的实体，以及实体之间明确存在的关系。
+
+-步骤-
+1. 识别实体。每个实体必须包含以下信息：
+- entity_name: 实体名称。英文实体请使用大写；中文实体保持原文名称，不要翻译。
+- entity_type: 必须是以下类型之一：[{entity_types}]
+- entity_description: 用简洁但完整的中文说明实体的属性、身份、行为或上下文。
+实体输出格式必须为：("entity"<|><entity_name><|><entity_type><|><entity_description>)
+
+2. 在已识别实体中，找出明确相关的实体对。不要凭空扩展文本中没有依据的关系。
+每条关系必须包含以下信息：
+- source_entity: 第 1 步中识别到的源实体名称
+- target_entity: 第 1 步中识别到的目标实体名称
+- relationship_description: 用中文说明两个实体为什么相关，必须基于原文证据
+- relationship_strength: 1 到 10 的数字，表示关系强度；直接、核心、反复出现的关系分数更高
+关系输出格式必须为：("relationship"<|><source_entity><|><target_entity><|><relationship_description><|><relationship_strength>)
+
+3. 只输出实体和关系列表。多条记录之间使用 **##** 分隔。
+
+4. 完成后输出 <|COMPLETE|>
+
+######################
+-示例-
+######################
+Entity_types: 组织,人物,地点,事件
+Text:
+张三在北京参加了星河科技举办的人工智能大会，并代表公司介绍了新的知识图谱产品。
+######################
+Output:
+("entity"<|>张三<|>人物<|>张三代表公司参加人工智能大会并介绍知识图谱产品)
+##
+("entity"<|>北京<|>地点<|>北京是人工智能大会的举办地点)
+##
+("entity"<|>星河科技<|>组织<|>星河科技是人工智能大会的举办方)
+##
+("entity"<|>人工智能大会<|>事件<|>人工智能大会是由星河科技举办的活动)
+##
+("relationship"<|>张三<|>人工智能大会<|>张三参加人工智能大会并介绍产品<|>8)
+##
+("relationship"<|>星河科技<|>人工智能大会<|>星河科技举办人工智能大会<|>9)
+##
+("relationship"<|>北京<|>人工智能大会<|>北京是人工智能大会的举办地点<|>6)
+<|COMPLETE|>
+
+######################
+-真实数据-
+######################
+Entity_types: {entity_types}
+Text: {input_text}
+######################
+Output:"""
+
+
+CONTINUE_PROMPT_ZH = "上一次抽取仍然可能遗漏了实体或关系。请只补充符合前面实体类型的遗漏项，并严格使用相同输出格式：\n"
+
+LOOP_PROMPT_ZH = "请判断是否仍有遗漏的实体或关系需要补充。如果有，请只回答 Y；如果没有，请只回答 N。\n"

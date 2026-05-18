@@ -4,6 +4,8 @@
 """A module containing 'SummarizationResult' and 'SummarizeExtractor' models."""
 
 import json
+import logging
+import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 ENTITY_NAME_KEY = "entity_name"
 DESCRIPTION_LIST_KEY = "description_list"
 MAX_LENGTH_KEY = "max_length"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -74,6 +78,10 @@ class SummarizeExtractor:
         elif len(descriptions) == 1:
             # 只有一条描述时不需要调用 LLM，直接复用原描述，节省成本。
             result = descriptions[0]
+        elif _should_use_local_summary(descriptions):
+            # 少量短描述直接在本地合并即可。
+            # 这类内容通常已经是结构化短句，调用 CodeBuddy 反而可能因为排队或卡顿拖慢建库。
+            result = _summarize_descriptions_locally(descriptions)
         else:
             # 多条描述需要合并去重、压缩表达，因此调用 LLM 总结。
             result = await self._summarize_descriptions(id, descriptions)
@@ -141,15 +149,50 @@ class SummarizeExtractor:
         """Summarize descriptions using the LLM."""
         # 将实体/关系标识、描述列表和最大长度填入 prompt，
         # 让 LLM 输出一段去重、完整、长度受控的最终描述。
-        response: LLMCompletionResponse = await self._model.completion_async(
-            messages=self._summarization_prompt.format(**{
-                ENTITY_NAME_KEY: json.dumps(id, ensure_ascii=False),
-                DESCRIPTION_LIST_KEY: json.dumps(
-                    sorted(descriptions), ensure_ascii=False
-                ),
-                MAX_LENGTH_KEY: self._max_summary_length,
-            }),
-        )  # type: ignore
-        # Calculate result
-        # GraphRAG 只取 LLM 返回的文本内容作为最终 description。
-        return response.content
+        prompt = self._summarization_prompt.format(**{
+            ENTITY_NAME_KEY: json.dumps(id, ensure_ascii=False),
+            DESCRIPTION_LIST_KEY: json.dumps(sorted(descriptions), ensure_ascii=False),
+            MAX_LENGTH_KEY: self._max_summary_length,
+        })
+        try:
+            response: LLMCompletionResponse = await self._model.completion_async(
+                messages=prompt,
+            )  # type: ignore
+            # Calculate result
+            # GraphRAG 只取 LLM 返回的文本内容作为最终 description。
+            return response.content
+        except Exception as e:  # pragma: no cover - fallback path depends on provider
+            logger.warning(
+                "description summarization failed; using local fallback",
+                exc_info=e,
+            )
+            self._on_error(
+                e,
+                traceback.format_exc(),
+                {
+                    "id": id,
+                    "description_count": len(descriptions),
+                },
+            )
+            return _summarize_descriptions_locally(descriptions)
+
+
+def _should_use_local_summary(descriptions: list[str]) -> bool:
+    """Return True when deterministic merging is enough for description text."""
+    total_chars = sum(len(description) for description in descriptions)
+    return len(descriptions) <= 5 and total_chars <= 500
+
+
+def _summarize_descriptions_locally(descriptions: list[str]) -> str:
+    """Merge short descriptions without an LLM call."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for description in descriptions:
+        text = str(description).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text.rstrip("。.;；"))
+    if not cleaned:
+        return ""
+    return "；".join(cleaned) + "。"

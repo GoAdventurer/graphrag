@@ -1,0 +1,50 @@
+# Runtime requirements for the local GraphRAG workspace.
+#
+# Install from the repository root:
+#   python -m pip install -r requirements.txt
+#
+# The editable local packages keep your modified source code active when running
+# the `graphrag` CLI, instead of accidentally using the published PyPI package.
+
+-e ./packages/graphrag-common
+-e ./packages/graphrag-storage
+-e ./packages/graphrag-cache
+-e ./packages/graphrag-chunking
+-e ./packages/graphrag-input
+-e ./packages/graphrag-vectors
+-e ./packages/graphrag-llm
+-e ./packages/graphrag
+
+# Core runtime dependencies used by the packages above. Most are also declared
+# in the package pyproject files; listing them here makes a single-file install
+# path explicit for notebooks and teaching environments.
+aiofiles~=24.1
+azure-core~=1.32
+azure-cosmos~=4.9
+azure-identity~=1.25
+azure-search-documents~=11.6
+azure-storage-blob~=12.24
+blis~=1.0
+devtools~=0.12
+graspologic-native~=1.2
+jinja2~=3.1
+json-repair~=0.30
+lancedb~=0.24.1
+litellm==1.82.6
+markitdown~=0.1.0
+markitdown[pdf]
+nest-asyncio2~=1.7
+networkx~=3.4
+nltk~=3.9
+numpy~=2.1
+pandas~=2.3
+pyarrow~=22.0
+pydantic~=2.10
+python-dotenv~=1.0
+pyyaml~=6.0
+spacy~=3.8
+textblob~=0.18
+toml
+tqdm~=4.67
+typer~=0.16
+typing-extensions~=4.12

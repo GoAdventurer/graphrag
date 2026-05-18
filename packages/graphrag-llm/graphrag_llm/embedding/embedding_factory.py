@@ -10,7 +10,7 @@ from graphrag_common.factory import Factory
 
 from graphrag_llm.cache import create_cache_key
 from graphrag_llm.config.tokenizer_config import TokenizerConfig
-from graphrag_llm.config.types import LLMProviderType
+from graphrag_llm.config.types import LLMProviderType, TokenizerType
 from graphrag_llm.metrics.noop_metrics_store import NoopMetricsStore
 from graphrag_llm.tokenizer.tokenizer_factory import create_tokenizer
 
@@ -105,7 +105,18 @@ def create_embedding(
                 msg = f"ModelConfig.type '{strategy}' is not registered in the CompletionFactory. Registered strategies: {', '.join(embedding_factory.keys())}"
                 raise ValueError(msg)
 
-    tokenizer = tokenizer or create_tokenizer(TokenizerConfig(model_id=model_id))
+    if tokenizer is None and model_config.model_provider == "ollama":
+        # LiteLLM 的 tokenizer 对本地 Ollama 模型名支持不如 OpenAI 稳定。
+        # GraphRAG 这里只需要估算 token 数用于切片/批量控制，使用 o200k_base
+        # 可以避免本地模型名无法识别导致建库失败。
+        tokenizer = create_tokenizer(
+            TokenizerConfig(
+                type=TokenizerType.Tiktoken,
+                encoding_name=extra.get("encoding_name", "o200k_base"),
+            )
+        )
+    else:
+        tokenizer = tokenizer or create_tokenizer(TokenizerConfig(model_id=model_id))
 
     rate_limiter: RateLimiter | None = None
     if model_config.rate_limit:

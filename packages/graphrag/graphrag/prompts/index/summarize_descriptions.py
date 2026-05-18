@@ -27,3 +27,27 @@ Description List: {description_list}
 #######
 Output:
 """
+
+
+# 中文描述总结 prompt 模板。
+# 当输入知识库以中文为主时，可以把它写入 prompts/summarize_descriptions.txt，
+# 或通过配置 summarize_descriptions.prompt 指向自定义 prompt 文件。
+SUMMARIZE_PROMPT_ZH = """
+你是一个负责整理知识图谱描述的助手。
+下面给出一个实体或一组实体，以及来自多个文本切片的描述列表。
+请把这些描述合并成一段完整、连贯、第三人称的中文描述。
+
+要求：
+- 尽量保留所有描述中的有效信息，不要遗漏关键事实。
+- 如果描述之间存在轻微重复，请合并去重。
+- 如果描述之间存在冲突，请基于整体上下文给出最一致的表达，不要编造新事实。
+- 描述中要包含实体名称，保证脱离原表也能理解上下文。
+- 最终描述长度不超过 {max_length} 个词。
+
+#######
+-数据-
+Entities: {entity_name}
+Description List: {description_list}
+#######
+Output:
+"""

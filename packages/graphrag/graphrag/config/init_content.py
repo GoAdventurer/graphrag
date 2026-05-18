@@ -21,7 +21,8 @@ completion_models:
     model_provider: {defs.DEFAULT_MODEL_PROVIDER}
     model: <DEFAULT_COMPLETION_MODEL>
     auth_method: {defs.DEFAULT_COMPLETION_MODEL_AUTH_TYPE} # or azure_managed_identity
-    api_key: ${{GRAPHRAG_API_KEY}} # set this in the generated .env file, or remove if managed identity
+    api_key: {defs.DEFAULT_OLLAMA_API_KEY} # Ollama local service does not require a real API key
+    api_base: {defs.DEFAULT_OLLAMA_API_BASE}
     retry:
       type: exponential_backoff
 
@@ -30,7 +31,8 @@ embedding_models:
     model_provider: {defs.DEFAULT_MODEL_PROVIDER}
     model: <DEFAULT_EMBEDDING_MODEL>
     auth_method: {defs.DEFAULT_EMBEDDING_MODEL_AUTH_TYPE}
-    api_key: ${{GRAPHRAG_API_KEY}}
+    api_key: {defs.DEFAULT_OLLAMA_API_KEY} # Ollama local service does not require a real API key
+    api_base: {defs.DEFAULT_OLLAMA_API_BASE}
     retry:
       type: exponential_backoff
 
@@ -70,6 +72,7 @@ cache:
 vector_store:
   type: {vector_store_defaults.type}
   db_uri: {vector_store_defaults.db_uri}
+  vector_size: {vector_store_defaults.vector_size}
 
 ### Workflow settings ###
 
@@ -140,5 +143,7 @@ basic_search:
 """
 
 INIT_DOTENV = """\
-GRAPHRAG_API_KEY=<API_KEY>
+# Ollama runs locally and does not require a real API key.
+# If you switch to OpenAI/Azure/etc., set GRAPHRAG_API_KEY here and update settings.yaml.
+# GRAPHRAG_API_KEY=<API_KEY>
 """

@@ -30,11 +30,14 @@ DEFAULT_CACHE_BASE_DIR = "cache"
 DEFAULT_UPDATE_OUTPUT_BASE_DIR = "update_output"
 DEFAULT_COMPLETION_MODEL_ID = "default_completion_model"
 DEFAULT_COMPLETION_MODEL_AUTH_TYPE = AuthMethod.ApiKey
-DEFAULT_COMPLETION_MODEL = "gpt-4.1"
+DEFAULT_COMPLETION_MODEL = "qwen2.5:7b"
 DEFAULT_EMBEDDING_MODEL_ID = "default_embedding_model"
 DEFAULT_EMBEDDING_MODEL_AUTH_TYPE = AuthMethod.ApiKey
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
-DEFAULT_MODEL_PROVIDER = "openai"
+DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:8b"
+DEFAULT_MODEL_PROVIDER = "ollama"
+DEFAULT_OLLAMA_API_BASE = "http://localhost:11434"
+DEFAULT_OLLAMA_API_KEY = "ollama"
+DEFAULT_EMBEDDING_VECTOR_SIZE = 4096
 
 ENCODING_MODEL = "o200k_base"
 COGNITIVE_SERVICES_AUDIENCE = "https://cognitiveservices.azure.com/.default"
@@ -335,6 +338,9 @@ class VectorStoreDefaults:
 
     type: ClassVar[str] = VectorStoreType.LanceDB.value
     db_uri: str = str(Path(DEFAULT_OUTPUT_BASE_DIR) / "lancedb")
+    # qwen3-embedding:8b 的默认向量维度是 4096。
+    # 如果后续换成其他 embedding 模型，需要同步调整 settings.yaml 里的 vector_size。
+    vector_size: int = DEFAULT_EMBEDDING_VECTOR_SIZE
 
 
 @dataclass

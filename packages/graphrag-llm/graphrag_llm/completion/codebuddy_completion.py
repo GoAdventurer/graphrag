@@ -10,6 +10,11 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Unpack
 
 from graphrag_llm.completion.completion import LLMCompletion
+from graphrag_llm.types import (
+    LLMChoiceChunk,
+    LLMChoiceDelta,
+    LLMCompletionChunk,
+)
 from graphrag_llm.utils import (
     create_completion_response,
     structure_completion_response,
@@ -78,13 +83,16 @@ class CodeBuddyCompletion(LLMCompletion):
         """Sync completion method."""
         messages = kwargs.pop("messages")
         response_format = kwargs.pop("response_format", None)
-
-        if kwargs.get("stream", False):
-            msg = "CodeBuddyCompletion does not support streaming completions."
-            raise ValueError(msg)
+        stream = kwargs.pop("stream", False)
 
         prompt = _messages_to_prompt(messages)
         output = self._call_codebuddy(prompt)
+        if stream:
+            # GraphRAG 的查询链路会用 stream=True 消费 LLM，即使 CLI 没有显式开启
+            # streaming。CodeBuddy CLI 当前返回完整文本，因此这里把完整结果包装成
+            # 一个单 chunk 的流，保持接口兼容。
+            return _single_chunk_iterator(output, self._model_config.model)
+
         response = create_completion_response(output)
 
         if response_format is not None:
@@ -101,6 +109,14 @@ class CodeBuddyCompletion(LLMCompletion):
         **kwargs: Unpack["LLMCompletionArgs[ResponseFormat]"],
     ) -> "LLMCompletionResponse[ResponseFormat] | AsyncIterator[LLMCompletionChunk]":
         """Async completion method."""
+        if kwargs.get("stream", False):
+            messages = kwargs.pop("messages")
+            kwargs.pop("response_format", None)
+            kwargs.pop("stream", None)
+            prompt = _messages_to_prompt(messages)
+            output = await asyncio.to_thread(self._call_codebuddy, prompt)
+            return _single_chunk_async_iterator(output, self._model_config.model)
+
         return await asyncio.to_thread(self.completion, **kwargs)  # type: ignore
 
     @property
@@ -151,6 +167,36 @@ def _messages_to_prompt(messages: "LLMCompletionMessagesParam") -> str:
         content = _get_message_value(message, "content")
         prompt_parts.append(f"{role}: {_stringify_content(content)}")
     return "\n\n".join(prompt_parts)
+
+
+def _single_chunk_iterator(content: str, model: str) -> Iterator[LLMCompletionChunk]:
+    """Yield a single OpenAI-compatible streaming chunk."""
+    yield _create_stream_chunk(content, model)
+
+
+async def _single_chunk_async_iterator(
+    content: str,
+    model: str,
+) -> AsyncIterator[LLMCompletionChunk]:
+    """Yield a single OpenAI-compatible streaming chunk asynchronously."""
+    yield _create_stream_chunk(content, model)
+
+
+def _create_stream_chunk(content: str, model: str) -> LLMCompletionChunk:
+    """Create a ChatCompletionChunk carrying the full CodeBuddy response."""
+    return LLMCompletionChunk(
+        id="codebuddy-completion-chunk",
+        object="chat.completion.chunk",
+        created=0,
+        model=model,
+        choices=[
+            LLMChoiceChunk(
+                index=0,
+                delta=LLMChoiceDelta(content=content),
+                finish_reason="stop",
+            )
+        ],
+    )
 
 
 def _ensure_sequence(messages: "LLMCompletionMessagesParam") -> Sequence[Any]:

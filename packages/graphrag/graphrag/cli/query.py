@@ -13,6 +13,7 @@ from graphrag_storage.tables.table_provider_factory import create_table_provider
 
 import graphrag.api as api
 from graphrag.callbacks.noop_query_callbacks import NoopQueryCallbacks
+from graphrag.config.enums import SearchMethod
 from graphrag.config.load_config import load_config
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.data_model.data_reader import DataReader
@@ -21,6 +22,192 @@ if TYPE_CHECKING:
     import pandas as pd
 
 # ruff: noqa: T201
+
+
+def run_auto_search(
+    data_dir: Path | None,
+    root_dir: Path,
+    community_level: int,
+    dynamic_community_selection: bool,
+    response_type: str,
+    streaming: bool,
+    query: str,
+    verbose: bool,
+):
+    """Route a query to the most suitable search strategy.
+
+    GraphRAG 原生提供 local/global/drift/basic 四种检索方式，但原 CLI
+    需要用户手动选择。这里增加一层轻量级自动路由：
+    - 不调用 LLM，避免查询前额外消耗 token 和时间；
+    - 只根据问题措辞做确定性判断，便于调试和复现；
+    - 选择后仍然复用原来的检索函数，避免复制检索实现。
+    """
+    method, reason = _select_auto_search_method(query)
+    if verbose:
+        print(f"[auto] selected method={method.value}: {reason}")
+
+    if method is SearchMethod.GLOBAL:
+        return run_global_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            community_level=community_level,
+            dynamic_community_selection=dynamic_community_selection,
+            response_type=response_type,
+            streaming=streaming,
+            query=query,
+            verbose=verbose,
+        )
+    if method is SearchMethod.DRIFT:
+        return run_drift_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            community_level=community_level,
+            response_type=response_type,
+            streaming=streaming,
+            query=query,
+            verbose=verbose,
+        )
+    if method is SearchMethod.BASIC:
+        return run_basic_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            response_type=response_type,
+            streaming=streaming,
+            query=query,
+            verbose=verbose,
+        )
+    return run_local_search(
+        data_dir=data_dir,
+        root_dir=root_dir,
+        community_level=community_level,
+        response_type=response_type,
+        streaming=streaming,
+        query=query,
+        verbose=verbose,
+    )
+
+
+def _select_auto_search_method(query: str) -> tuple[SearchMethod, str]:
+    """Choose a search method with transparent keyword heuristics.
+
+    这是“工程可控”的第一版自动路由。它不会假装理解所有语义，而是把常见
+    问题意图分成四类：
+    - global：全局概览、主题总结、整体趋势；
+    - drift：需要围绕实体做分析推理、原因解释、影响链路；
+    - basic：强调原文、引用、证据片段的朴素文本检索；
+    - local：默认的实体/关系精确问答。
+
+    后续如果需要更强的智能路由，可以把这个函数替换成 LLM 分类器，但 CLI
+    层和各检索函数不需要改变。
+    """
+    normalized = query.strip().lower()
+
+    basic_keywords = (
+        "原文",
+        "引用",
+        "出处",
+        "来源",
+        "证据",
+        "片段",
+        "chunk",
+        "quote",
+        "cite",
+        "source",
+        "evidence",
+    )
+    if any(keyword in normalized for keyword in basic_keywords):
+        return (SearchMethod.BASIC, "question asks for source text or evidence")
+
+    global_keywords = (
+        "总结",
+        "概览",
+        "整体",
+        "全局",
+        "主题",
+        "趋势",
+        "有哪些",
+        "分别是什么",
+        "overview",
+        "summarize",
+        "summary",
+        "theme",
+        "trend",
+        "overall",
+    )
+    if any(keyword in normalized for keyword in global_keywords):
+        return (SearchMethod.GLOBAL, "question is broad and benefits from community reports")
+
+    drift_keywords = (
+        "为什么",
+        "原因",
+        "影响",
+        "关联路径",
+        "链路",
+        "推理",
+        "分析",
+        "对比",
+        "区别",
+        "怎么导致",
+        "why",
+        "impact",
+        "compare",
+        "difference",
+        "reason",
+        "analyze",
+    )
+    if any(keyword in normalized for keyword in drift_keywords):
+        return (SearchMethod.DRIFT, "question needs entity-centered reasoning")
+
+    return (SearchMethod.LOCAL, "default to entity and relationship grounded search")
+
+
+def print_context_summary(context_data: Any, max_items: int = 5) -> None:
+    """Print a compact explanation of the retrieved context.
+
+    Query API 返回的 context_data 往往包含若干张表或列表。默认不打印是为了
+    保持回答干净；当 CLI 传入 --show-context 时，这里只打印“用了哪些上下文
+    和大概多少条”，避免把完整检索上下文刷屏。
+    """
+    if not context_data:
+        print("\n[context] no context data captured")
+        return
+
+    print("\n[context] retrieved context summary")
+    if isinstance(context_data, dict):
+        for name, value in context_data.items():
+            _print_context_value(name, value, max_items)
+        return
+
+    _print_context_value("context", context_data, max_items)
+
+
+def _print_context_value(name: str, value: Any, max_items: int) -> None:
+    """Print one context object without exposing large content."""
+    if hasattr(value, "shape"):
+        rows, cols = value.shape
+        print(f"- {name}: dataframe rows={rows}, columns={cols}")
+        return
+
+    if isinstance(value, list):
+        print(f"- {name}: list items={len(value)}")
+        for item in value[:max_items]:
+            print(f"  sample: {_context_preview(item)}")
+        return
+
+    if isinstance(value, dict):
+        print(f"- {name}: dict keys={list(value.keys())[:max_items]}")
+        return
+
+    print(f"- {name}: {type(value).__name__}")
+
+
+def _context_preview(item: Any) -> str:
+    """Return a single-line preview for context diagnostics."""
+    if isinstance(item, dict):
+        keys = list(item.keys())[:5]
+        return "{" + ", ".join(f"{key}={str(item.get(key))[:40]!r}" for key in keys) + "}"
+    text = str(item).replace("\n", " ")
+    return text[:120]
 
 
 def run_global_search(

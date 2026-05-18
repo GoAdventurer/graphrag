@@ -31,6 +31,7 @@ class AsyncType(str, Enum):
 class SearchMethod(Enum):
     """The type of search to run."""
 
+    AUTO = "auto"
     LOCAL = "local"
     GLOBAL = "global"
     DRIFT = "drift"

@@ -17,7 +17,9 @@ from graphrag.index.typing.error_handler import ErrorHandlerFn
 from graphrag.index.utils.string import clean_str
 from graphrag.prompts.index.extract_graph import (
     CONTINUE_PROMPT,
+    CONTINUE_PROMPT_ZH,
     LOOP_PROMPT,
+    LOOP_PROMPT_ZH,
 )
 
 if TYPE_CHECKING:
@@ -113,12 +115,14 @@ class GraphExtractor:
         # 把模型回答加入上下文，后续补抽时 LLM 能看到自己已经抽过什么。
         messages_builder.add_assistant_message(results)
 
+        continue_prompt, loop_prompt = _select_gleaning_prompts(self._extraction_prompt)
+
         # if gleanings are specified, enter a loop to extract more entities
         # there are two exit criteria: (a) we hit the configured max, (b) the model says there are no more entities
         if self._max_gleanings > 0:
             for i in range(self._max_gleanings):
                 # 继续要求 LLM 补充遗漏的实体/关系，并要求使用同样的输出格式。
-                messages_builder.add_user_message(CONTINUE_PROMPT)
+                messages_builder.add_user_message(continue_prompt)
                 response: LLMCompletionResponse = await self._model.completion_async(
                     messages=messages_builder.build(),
                 )  # type: ignore
@@ -133,7 +137,7 @@ class GraphExtractor:
 
                 # 询问 LLM 是否仍有遗漏。
                 # 如果模型回答不是 Y，就提前停止补抽，降低调用成本。
-                messages_builder.add_user_message(LOOP_PROMPT)
+                messages_builder.add_user_message(loop_prompt)
                 response: LLMCompletionResponse = await self._model.completion_async(
                     messages=messages_builder.build(),
                 )  # type: ignore
@@ -216,6 +220,15 @@ class GraphExtractor:
 def _empty_entities_df() -> pd.DataFrame:
     # 空实体表的标准 schema。
     return pd.DataFrame(columns=["title", "type", "description", "source_id"])
+
+
+def _select_gleaning_prompts(extraction_prompt: str) -> tuple[str, str]:
+    """根据主抽取 prompt 选择同语言的补抽 prompt。"""
+    # 主 prompt 已经是中文时，补抽和“是否继续”也必须用中文。
+    # 否则第一轮要求中文、后续追问用英文，模型容易把补抽结果重新写成英文。
+    if any(marker in extraction_prompt for marker in ("-目标-", "-步骤-", "真实数据")):
+        return CONTINUE_PROMPT_ZH, LOOP_PROMPT_ZH
+    return CONTINUE_PROMPT, LOOP_PROMPT
 
 
 def _empty_relationships_df() -> pd.DataFrame:

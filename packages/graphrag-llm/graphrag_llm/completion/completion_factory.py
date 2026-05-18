@@ -117,7 +117,9 @@ def create_completion(
                 msg = f"ModelConfig.type '{strategy}' is not registered in the CompletionFactory. Registered strategies: {', '.join(completion_factory.keys())}"
                 raise ValueError(msg)
 
-    if tokenizer is None and strategy == LLMProviderType.CodeBuddy:
+    if tokenizer is None and (
+        strategy == LLMProviderType.CodeBuddy or model_config.model_provider == "ollama"
+    ):
         tokenizer = create_tokenizer(
             TokenizerConfig(
                 type=TokenizerType.Tiktoken,

@@ -99,6 +99,11 @@ class ModelConfig(BaseModel):
             if self.api_key is not None:
                 msg = "api_key should not be set when using Azure Managed Identity."
                 raise ValueError(msg)
+        # Ollama is a local HTTP service and normally does not require an API key.
+        # LiteLLM still routes it through the same provider path, so we explicitly
+        # exempt it from cloud-provider API key validation.
+        elif self.model_provider == "ollama":
+            return
         elif not self.api_key:
             msg = "api_key must be set when auth_method=api_key."
             raise ValueError(msg)

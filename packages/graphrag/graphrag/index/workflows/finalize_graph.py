@@ -50,10 +50,12 @@ async def run_workflow(
     # 如果开启 GraphML 快照，则把最终 relationships 表转换成标准 GraphML 文件。
     # 默认 file storage 下会写到输出目录，文件名通常是 graph.graphml。
     if config.snapshots.graphml:
+        ents = await context.output_table_provider.read_dataframe("entities")
         rels = await context.output_table_provider.read_dataframe("relationships")
         await snapshot_graphml(
-            rels,
+            edges=rels,
             name="graph",
+            nodes=ents,
             storage=context.output_storage,
         )
 

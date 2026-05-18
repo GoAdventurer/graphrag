@@ -379,10 +379,10 @@ def _query_cli(
         autocompletion=ROOT_AUTOCOMPLETE,
     ),
     method: SearchMethod = typer.Option(
-        SearchMethod.GLOBAL.value,
+        SearchMethod.AUTO.value,
         "--method",
         "-m",
-        help="The query algorithm to use.",
+        help="The query algorithm to use. Use auto to route by question intent.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -427,18 +427,37 @@ def _query_cli(
         "--streaming/--no-streaming",
         help="Print the response in a streaming manner.",
     ),
+    show_context: bool = typer.Option(
+        False,
+        "--show-context/--no-show-context",
+        help="Print a compact summary of retrieved context for debugging.",
+    ),
 ) -> None:
     """Query a knowledge graph index."""
     from graphrag.cli.query import (
+        print_context_summary,
+        run_auto_search,
         run_basic_search,
         run_drift_search,
         run_global_search,
         run_local_search,
     )
 
+    result = None
     match method:
+        case SearchMethod.AUTO:
+            result = run_auto_search(
+                data_dir=data,
+                root_dir=root,
+                community_level=community_level,
+                dynamic_community_selection=dynamic_community_selection,
+                response_type=response_type,
+                streaming=streaming,
+                query=query,
+                verbose=verbose,
+            )
         case SearchMethod.LOCAL:
-            run_local_search(
+            result = run_local_search(
                 data_dir=data,
                 root_dir=root,
                 community_level=community_level,
@@ -448,7 +467,7 @@ def _query_cli(
                 verbose=verbose,
             )
         case SearchMethod.GLOBAL:
-            run_global_search(
+            result = run_global_search(
                 data_dir=data,
                 root_dir=root,
                 community_level=community_level,
@@ -459,7 +478,7 @@ def _query_cli(
                 verbose=verbose,
             )
         case SearchMethod.DRIFT:
-            run_drift_search(
+            result = run_drift_search(
                 data_dir=data,
                 root_dir=root,
                 community_level=community_level,
@@ -469,7 +488,7 @@ def _query_cli(
                 verbose=verbose,
             )
         case SearchMethod.BASIC:
-            run_basic_search(
+            result = run_basic_search(
                 data_dir=data,
                 root_dir=root,
                 response_type=response_type,
@@ -479,3 +498,6 @@ def _query_cli(
             )
         case _:
             raise ValueError(INVALID_METHOD_ERROR)
+
+    if show_context and isinstance(result, tuple) and len(result) == 2:
+        print_context_summary(result[1])
